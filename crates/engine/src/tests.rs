@@ -353,26 +353,41 @@ fn keyframes_on_a_frame_hold_go_where_the_playhead_is() {
     assert_eq!(scale(&s, second), (2, 50.0));
 }
 
-/// A mask changed at the playhead on a Frame Hold clip with Hold Filters off is keyed there, where
-/// the Program monitor shows it, not on the held frame, where the clip already has a keyframe.
+/// The other commands that change an animated value at the playhead (Nudge on a clip and on a
+/// graphic layer, a graphic's properties, a mask's feather) key it there on a Frame Hold clip
+/// with Hold Filters off too, not on the held frame, where the clip already has a keyframe.
 #[test]
 fn values_changed_on_a_frame_hold_are_keyed_where_the_playhead_is() {
-    use filmcraft_project::{Keyframe, Param, TrackItem};
+    use filmcraft_project::{ClipId, Keyframe, Param, TrackItem};
     #[derive(Debug)]
     enum At {
+        Motion,
+        Layer,
         MaskFeather,
     }
     fn param<'a>(it: &'a mut TrackItem, at: &At) -> &'a mut Param {
         match at {
+            At::Motion => it.effect_mut("motion").unwrap().params.get_mut("position").unwrap(),
+            At::Layer => it.effects.iter_mut().find(|e| filmcraft_project::graphic::is_layer(e)).unwrap().params.get_mut("position").unwrap(),
             At::MaskFeather => &mut it.effect_mut("opacity").unwrap().masks[0].feather,
         }
     }
-    let cases = [(At::MaskFeather, "masks.set", json!({"feather": 30}))];
+    let cases = [
+        (At::Motion, "graphics.nudgeRight", json!({})),
+        (At::Layer, "graphics.nudgeRight", json!({})),
+        (At::Layer, "graphics.set", json!({"props": {"position": [10, 20]}})),
+        (At::MaskFeather, "masks.set", json!({"feather": 30})),
+    ];
     for (at, command, params) in cases {
         let mut s = demo();
-        let c = s.active_sequence().unwrap().video_tracks[0].items[0].id;
+        let c = match at {
+            At::Layer => ClipId(s.execute("graphics.newText", json!({"text": "Held"})).unwrap()["clip"].as_u64().unwrap()),
+            _ => s.active_sequence().unwrap().video_tracks[0].items[0].id,
+        };
         s.execute("timeline.select", json!({"clips": [c.0]})).unwrap();
-        s.execute("masks.add", json!({"clip": c.0, "effect": "opacity", "shape": "ellipse"})).unwrap();
+        if let At::MaskFeather = at {
+            s.execute("masks.add", json!({"clip": c.0, "effect": "opacity", "shape": "ellipse"})).unwrap();
+        }
         s.execute("clip.frameHoldOptions", json!({"clips": [c.0], "holdOn": "in", "holdFilters": false})).unwrap();
         let seq = s.state.active_sequence.unwrap();
         let it = std::sync::Arc::make_mut(&mut s.project).sequence_mut(seq).unwrap().find_item_mut(c).unwrap().1;

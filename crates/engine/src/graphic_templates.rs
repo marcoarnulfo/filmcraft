@@ -251,7 +251,7 @@ fn clip_item(s: &Session, clip: ClipId) -> Result<TrackItem> {
 }
 
 fn mt_at_playhead(s: &Session, it: &TrackItem) -> Tick {
-    it.source_time_at(s.playhead().clamp(it.start, it.end() - Tick(1)))
+    it.effect_time_at(s.playhead().clamp(it.start, it.end() - Tick(1)))
 }
 
 /// Set template controls `values` ({control id or name: value}) on `clip`, each as its own
@@ -777,7 +777,7 @@ fn set_char_style(s: &mut Session, p: &Value) -> Result<Value> {
     let (start, end) = (u64_p(p, "start").map(|v| v as usize), u64_p(p, "end").map(|v| v as usize));
     let runs = s.edit_sequence("Character Style", move |q, _, _| {
         let (_, it) = q.find_item_mut(clip).ok_or(filmcraft_edit::EditError::NoItem(clip))?;
-        let mt = it.source_time_at(tl.clamp(it.start, it.end() - Tick(1)));
+        let mt = it.effect_time_at(tl.clamp(it.start, it.end() - Tick(1)));
         let e = &mut it.effects[ei];
         if e.effect != graphic::TEXT_LAYER {
             return Err(bad("graphics.setCharStyle", "the layer is not a text layer"));
