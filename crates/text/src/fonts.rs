@@ -298,6 +298,8 @@ fn file_coverage(p: &std::path::Path) -> Arc<Vec<Coverage>> {
     FILES.lock().unwrap_or_else(PoisonError::into_inner).entry(p.to_path_buf()).or_insert_with(|| Arc::new(faces)).clone()
 }
 
+/// `mappings()` skips code points mapped to glyph 0 (`.notdef`), so, like [`Face::glyph`], a face
+/// whose `cmap` sends a range to `.notdef` does not count as covering it.
 fn coverage(font: &FontRef<'_>) -> Coverage {
     let mut cps: Vec<u32> = font.charmap().mappings().map(|(c, _)| c).collect();
     cps.sort_unstable();
@@ -527,14 +529,48 @@ pub fn fallback_for(c: char, prefer: FaceId) -> FaceId {
             return f.id;
         }
     }
+    if is_default_ignorable(c) {
+        return prefer;
+    }
     system_fallback(c).unwrap_or(prefer)
+}
+
+/// Unicode's `Default_Ignorable_Code_Point` (DerivedCoreProperties.txt): joiners, direction marks
+/// and isolates, variation selectors, the soft hyphen, BOM, tags. Text fonts rarely map them and
+/// a renderer may draw nothing for them, so they never justify reading the installed fonts; a
+/// Persian or Arabic title is full of U+200C and U+200F. (Category Cf alone would also take the
+/// visible Arabic number signs U+0600..U+0605 out of the fallback.)
+fn is_default_ignorable(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0xAD | 0x34F
+            | 0x61C
+            | 0x115F..=0x1160
+            | 0x17B4..=0x17B5
+            | 0x180B..=0x180F
+            | 0x200B..=0x200F
+            | 0x202A..=0x202E
+            | 0x2060..=0x206F
+            | 0x3164
+            | 0xFE00..=0xFE0F
+            | 0xFEFF
+            | 0xFFA0
+            | 0xFFF0..=0xFFF8
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0000..=0xE0FFF
+    )
 }
 
 /// An installed face for a character no loaded face covers (Arabic in Inter text on Windows,
 /// #1475). The system folders are scanned on first need and probed with [`Face::covers_text`],
 /// upright regular faces first; the answer, found or not, is kept per character so each one costs
-/// the probe once per process.
+/// the probe once per process. That cache, like [`file_coverage`], lives as long as the process:
+/// a font installed afterwards is not probed for a character already found nowhere, and a file
+/// that could not be read (locked, not mounted yet) stays covering nothing.
 fn system_fallback(c: char) -> Option<FaceId> {
+    #[cfg(test)]
+    tests::count_probe(c);
     static FOUND: Mutex<BTreeMap<char, Option<FaceId>>> = Mutex::new(BTreeMap::new());
     if let Some(found) = FOUND.lock().unwrap_or_else(PoisonError::into_inner).get(&c) {
         return *found;
@@ -669,6 +705,53 @@ mod tests {
 
     fn reads(p: &std::path::Path) -> usize {
         READS.lock().unwrap_or_else(PoisonError::into_inner).get(p).copied().unwrap_or(0)
+    }
+
+    static PROBES: Mutex<BTreeMap<char, usize>> = Mutex::new(BTreeMap::new());
+
+    pub(super) fn count_probe(c: char) {
+        *PROBES.lock().unwrap_or_else(PoisonError::into_inner).entry(c).or_default() += 1;
+    }
+
+    /// Joiners, direction marks, isolates, variation selectors, soft hyphen, BOM and tags that no
+    /// loaded face maps never send layout through the installed fonts: a Persian title full of U+200C would
+    /// otherwise read every font file on the machine on first use (#1478 review).
+    #[test]
+    fn format_characters_never_probe_the_system() {
+        let ignorable = "\u{ad}\u{200b}\u{200c}\u{200d}\u{200e}\u{200f}\u{202a}\u{202e}\u{2060}\u{2066}\u{2069}\u{fe0f}\u{feff}\u{e0041}";
+        let bundled: Vec<Arc<Face>> = all_faces().into_iter().filter(|f| f.info.origin == "bundled").collect();
+        assert!(
+            ignorable.chars().any(|c| bundled.iter().all(|f| !f.has_char(c))),
+            "some of them must be missing from every bundled face, or layout never asks for a fallback"
+        );
+        let text = format!("A{ignorable}B");
+        crate::layout(&text, &crate::TextStyle { size: 40.0, ..Default::default() }, &Default::default());
+        let probes = PROBES.lock().unwrap_or_else(PoisonError::into_inner);
+        for c in ignorable.chars() {
+            assert_eq!(probes.get(&c), None, "U+{:04X}", u32::from(c));
+        }
+    }
+
+    /// A `cmap` that maps code points to glyph 0 (`.notdef`) does not make the face cover them,
+    /// as the per-character check before the coverage cache did (`g != 0`).
+    #[test]
+    fn coverage_skips_code_points_mapped_to_notdef() {
+        // a font with only a cmap: format 12, 'A' -> glyph 0, 'B' -> glyph 0, 'C' -> glyph 5
+        let mut data: Vec<u8> = Vec::new();
+        let mut put = |v: &[u32], bytes: usize| v.iter().for_each(|x| data.extend_from_slice(&x.to_be_bytes()[4 - bytes..]));
+        put(&[0x0001_0000], 4);
+        put(&[1, 16, 0, 0], 2);
+        put(&[u32::from_be_bytes(*b"cmap"), 0, 28, 64], 4);
+        put(&[0, 1, 3, 10], 2);
+        put(&[12], 4);
+        put(&[12, 0], 2);
+        put(&[52, 0, 3, 0x41, 0x41, 0, 0x42, 0x42, 0, 0x43, 0x43, 5], 4);
+        let font = FontRef::new(&data).expect("cmap-only font");
+        let cmap = skrifa::raw::TableProvider::cmap(&font).expect("cmap");
+        assert_eq!(cmap.map_codepoint('A').map(|g| g.to_u32()), Some(0), "the fixture maps 'A' to .notdef");
+        assert_eq!(cmap.map_codepoint('B').map(|g| g.to_u32()), Some(0));
+        assert_eq!(cmap.map_codepoint('C').map(|g| g.to_u32()), Some(5));
+        assert_eq!(coverage(&font), vec![(0x43, 0x43)]);
     }
 
     /// Probing installed faces for characters none of them covers reads each font file once per
