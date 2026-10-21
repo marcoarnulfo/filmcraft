@@ -188,3 +188,23 @@ fn a_track_resized_on_its_own_keeps_its_height_in_the_saved_project() {
     assert_eq!(rows(&e), before);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// What Expand / Minimize All Tracks gives back belongs to the sequence it was pressed in: another
+/// sequence already at the target height does not get those heights, shared or per track.
+#[test]
+fn expand_all_tracks_gives_back_only_the_heights_of_the_same_sequence() {
+    let mut d = Driver::demo();
+    d.drag("timeline.track.V1.resize", 0.5, -15.0);
+    d.ok("ui.key", json!({"key": "Shift+="}));
+    d.frames(3);
+    // another sequence, already at the height Expand All Tracks gives
+    d.ok("engine.execute", json!({"command": "file.newSequence", "params": {"name": "B"}}));
+    d.frames(3);
+    d.ok("ui.set", json!({"timeline": {"videoTrackHeight": 120.0, "audioTrackHeight": 120.0}}));
+    d.frames(3);
+    d.ok("ui.key", json!({"key": "Shift+="}));
+    d.frames(3);
+    let tv = &d.app().ui.timeline;
+    assert_eq!((tv.video_track_h, tv.audio_track_h), (120.0, 120.0), "the first sequence's shared heights");
+    assert!(tv.video_heights.is_empty() && tv.audio_heights.is_empty(), "the first sequence's tracks: {:?} {:?}", tv.video_heights, tv.audio_heights);
+}

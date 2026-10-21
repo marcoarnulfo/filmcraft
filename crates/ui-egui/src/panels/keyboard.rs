@@ -41,13 +41,15 @@ pub struct KeysState {
     /// The video / audio tracks resized on their own before Expand / Minimize All Tracks (track
     /// id -> height), restored with `saved_heights`.
     pub saved_own_heights: [std::collections::BTreeMap<u64, f32>; 2],
+    /// The sequence they were saved in: only that one gets them back.
+    pub saved_for: Option<filmcraft_engine::project::ItemId>,
     /// Icon view columns in the last frame (Move Selection Up / Down step).
     pub icon_columns: usize,
 }
 
 impl Default for KeysState {
     fn default() -> Self {
-        Self { maximized: None, saved_heights: None, saved_own_heights: Default::default(), icon_columns: 1 }
+        Self { maximized: None, saved_heights: None, saved_own_heights: Default::default(), saved_for: None, icon_columns: 1 }
     }
 }
 
@@ -324,10 +326,11 @@ fn play_range(app: &mut FilmcraftApp, preroll: bool) -> Result<Value, String> {
 }
 
 fn all_heights(app: &mut FilmcraftApp, expand: bool) -> Value {
+    let active = app.session.state.active_sequence;
     let tv = &mut app.ui.timeline;
     let target = if expand { 120.0 } else { MIN_TRACK_H };
     let at_target = tv.video_track_h == target && tv.audio_track_h == target && tv.video_heights.is_empty() && tv.audio_heights.is_empty();
-    match (at_target, app.ui.keys.saved_heights) {
+    match (at_target, app.ui.keys.saved_heights.filter(|_| app.ui.keys.saved_for == active)) {
         // pressing again restores the heights from before
         (true, Some([v, a])) => {
             tv.set_kind_h(filmcraft_project::TrackKind::Video, v);
@@ -338,6 +341,7 @@ fn all_heights(app: &mut FilmcraftApp, expand: bool) -> Value {
         _ => {
             app.ui.keys.saved_heights = Some([tv.video_track_h, tv.audio_track_h]);
             app.ui.keys.saved_own_heights = [tv.video_heights.clone(), tv.audio_heights.clone()];
+            app.ui.keys.saved_for = active;
             tv.set_kind_h(filmcraft_project::TrackKind::Video, target);
             tv.set_kind_h(filmcraft_project::TrackKind::Audio, target);
         }
