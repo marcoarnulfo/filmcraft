@@ -38,13 +38,16 @@ pub struct KeysState {
     pub maximized: Option<PanelKind>,
     /// Track heights before Expand / Minimize All Tracks (pressing again restores them).
     pub saved_heights: Option<[f32; 2]>,
+    /// The video / audio tracks resized on their own before Expand / Minimize All Tracks (track
+    /// id -> height), restored with `saved_heights`.
+    pub saved_own_heights: [std::collections::BTreeMap<u64, f32>; 2],
     /// Icon view columns in the last frame (Move Selection Up / Down step).
     pub icon_columns: usize,
 }
 
 impl Default for KeysState {
     fn default() -> Self {
-        Self { maximized: None, saved_heights: None, icon_columns: 1 }
+        Self { maximized: None, saved_heights: None, saved_own_heights: Default::default(), icon_columns: 1 }
     }
 }
 
@@ -329,10 +332,12 @@ fn all_heights(app: &mut FilmcraftApp, expand: bool) -> Value {
         (true, Some([v, a])) => {
             tv.set_kind_h(filmcraft_project::TrackKind::Video, v);
             tv.set_kind_h(filmcraft_project::TrackKind::Audio, a);
+            [tv.video_heights, tv.audio_heights] = std::mem::take(&mut app.ui.keys.saved_own_heights);
             app.ui.keys.saved_heights = None;
         }
         _ => {
             app.ui.keys.saved_heights = Some([tv.video_track_h, tv.audio_track_h]);
+            app.ui.keys.saved_own_heights = [tv.video_heights.clone(), tv.audio_heights.clone()];
             tv.set_kind_h(filmcraft_project::TrackKind::Video, target);
             tv.set_kind_h(filmcraft_project::TrackKind::Audio, target);
         }

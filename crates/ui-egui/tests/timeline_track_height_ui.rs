@@ -144,3 +144,47 @@ fn dragging_a_line_resizes_only_the_track_it_belongs_to() {
     assert!(d.row_heights(TrackKind::Video).iter().all(|h| *h == 30.0), "{:?}", d.row_heights(TrackKind::Video));
     assert_eq!(d.row_heights(TrackKind::Audio), a1, "audio tracks are left alone");
 }
+
+#[test]
+fn expand_all_tracks_pressed_again_gives_back_a_track_resized_on_its_own() {
+    let mut d = Driver::demo();
+    // row heights come from rects, so they are compared to a tenth of a point
+    let rows = |d: &Driver| [TrackKind::Video, TrackKind::Audio].map(|k| d.row_heights(k).iter().map(|h| (h * 10.0).round() / 10.0).collect::<Vec<_>>());
+    d.drag("timeline.track.V1.resize", 0.5, -15.0);
+    d.drag("timeline.track.A1.resize", 0.5, 15.0);
+    let before = rows(&d);
+    let [v0, a0] = &before;
+    assert!(v0[0] > v0[1] && a0[0] > a0[1], "V1 and A1 resized on their own: {v0:?} {a0:?}");
+    for key in ["Shift+=", "Shift+-"] {
+        d.ok("ui.key", json!({"key": key}));
+        d.frames(3);
+        let [v1, a1] = rows(&d);
+        assert!(v1.iter().chain(&a1).all(|h| *h == v1[0]) && v1[0] != v0[0], "{key}: every track at one height: {v1:?} {a1:?}");
+        // pressing again gives every track the height it had, the ones resized on their own too
+        d.ok("ui.key", json!({"key": key}));
+        d.frames(3);
+        assert_eq!(rows(&d), before, "{key} pressed again");
+    }
+}
+
+#[test]
+fn a_track_resized_on_its_own_keeps_its_height_in_the_saved_project() {
+    let dir = std::env::temp_dir().join(format!("filmcraft-track-heights-ui-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("heights.fcproj").to_string_lossy().to_string();
+    let mut d = Driver::demo();
+    d.drag("timeline.track.V1.resize", 0.5, -15.0);
+    d.drag("timeline.track.A1.resize", 0.5, 15.0);
+    let rows = |d: &Driver| [TrackKind::Video, TrackKind::Audio].map(|k| d.row_heights(k).iter().map(|h| (h * 10.0).round() / 10.0).collect::<Vec<_>>());
+    let before = rows(&d);
+    assert!(before[0][0] > before[0][1] && before[1][0] > before[1][1], "V1 and A1 resized on their own: {before:?}");
+    d.ok("engine.execute", json!({"command": "file.saveAs", "params": {"path": path}}));
+
+    // another window of the app opens the file
+    let mut e = Driver::demo();
+    e.ok("engine.execute", json!({"command": "file.open", "params": {"path": path}}));
+    e.frames(3);
+    assert_eq!(rows(&e), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
