@@ -246,8 +246,10 @@ fn select_clip_at_playhead_over_a_gap_selects_the_gap() {
         (q.video_tracks[0].id, q.audio_tracks[0].id)
     };
     s.set_playhead(f(60));
-    s.execute("timeline.selectClipAtPlayhead", json!({})).unwrap();
+    let r = s.execute("timeline.selectClipAtPlayhead", json!({})).unwrap();
     assert_eq!(s.state.gap_selection.map(|g| (g.track, g.range.start, g.range.end())), Some((v1, f(48), f(96))));
+    // a reader of `selection` still finds it, empty, next to the gap
+    assert_eq!(r, json!({"selection": [], "track": v1.0, "start": f(48).0, "end": f(96).0}));
     assert!(s.state.selection.is_empty());
     assert!(s.is_enabled("edit.rippleDelete"), "Ripple Delete closes the gap D selected");
 
@@ -258,7 +260,8 @@ fn select_clip_at_playhead_over_a_gap_selects_the_gap() {
 
     // over a clip, D selects the clip and drops the gap
     s.set_playhead(f(10));
-    s.execute("timeline.selectClipAtPlayhead", json!({})).unwrap();
+    let r = s.execute("timeline.selectClipAtPlayhead", json!({})).unwrap();
     assert!(s.state.selection.contains(&sound1));
+    assert!(r["selection"].as_array().is_some_and(|a| a.contains(&json!(sound1.0))), "{r}");
     assert!(s.state.gap_selection.is_none());
 }

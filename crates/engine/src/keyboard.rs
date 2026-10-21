@@ -151,7 +151,12 @@ fn select_at_playhead(s: &mut Session) -> Result<Value> {
         None
     };
     if let Some(track) = gap_track {
-        return s.execute("timeline.selectGap", json!({"track": track.0, "time": t.0}));
+        // keep the clip case's `selection` key (empty now) next to the gap, for readers of either
+        let mut r = s.execute("timeline.selectGap", json!({"track": track.0, "time": t.0}))?;
+        if let Some(o) = r.as_object_mut() {
+            o.insert("selection".into(), json!([]));
+        }
+        return Ok(r);
     }
     select_clip_at_playhead(s)
 }
