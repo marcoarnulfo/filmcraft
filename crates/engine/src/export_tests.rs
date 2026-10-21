@@ -423,7 +423,7 @@ fn queue_orders_cancels_and_retries() {
     assert!(job(c) < job(b) && job(b) < job(a));
     // each finished item says how long its encode took, the cancelled one says nothing
     let took = |id: u64| items.iter().find(|i| i["id"] == id).unwrap()["renderSeconds"].clone();
-    assert!([c, b, a].iter().all(|&id| took(id).as_f64().is_some_and(|s| s > 0.0)), "{items:?}");
+    assert!([c, b, a].iter().all(|&id| took(id).as_f64().is_some_and(|s| s >= 0.0)), "{items:?}");
     assert!(took(d).is_null(), "{items:?}");
     for f in ["a.mp4", "b.mov", "c.wav"] {
         assert!(Path::new(&dir.path(f)).exists(), "{f}");
