@@ -560,7 +560,14 @@ fn layout_inner(
                 ui.data_mut(|d| d.insert_temp(pointer_focus_id, true));
             } else if !response.response.has_focus() {
                 ui.data_mut(|d| d.remove::<bool>(pointer_focus_id));
+            } else if pointer_focus && response.delta != 0.0 && !response.response.dragged() {
+                // an arrow key moved it: from here on the keyboard is driving, so show the focus fill
+                ui.data_mut(|d| d.remove::<bool>(pointer_focus_id));
+                ui.ctx().request_repaint();
             } else if pointer_focus && response.response.hovered() && !response.response.dragged() {
+                // the handle paints its (transparent) focused fill, not the hover one, for a focused
+                // divider under the pointer; if a craft-ui bump paints the hover fill there too, this
+                // would draw it twice and darken it
                 ui.painter().rect_filled(split.divider, 0.0, hovered);
             }
             reg.add_response(&format!("dock.gutter.{path}"), &response.response, "gutter");
