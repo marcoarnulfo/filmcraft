@@ -146,3 +146,13 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# PROBE (investigation only): optimise the crates measured by aniso_probe
+[profile.dev.package.filmcraft-gpu]
+opt-level = 3
+
+[profile.dev.package.filmcraft-render]
+opt-level = 3
+
+[profile.dev.package.filmcraft-frame]
+opt-level = 3

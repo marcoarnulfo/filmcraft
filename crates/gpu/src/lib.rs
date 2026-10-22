@@ -625,7 +625,19 @@ impl GpuCompositor {
         let sx = (m.a * m.a + m.b * m.b).sqrt();
         let sy = (m.c * m.c + m.d * m.d).sqrt();
         let footprint = (1.0 / sx.min(sy).max(1e-6)) as f32;
-        let taps = if footprint > 1.25 { footprint.ceil().min(4.0) } else { 1.0 };
+        // PROBE (investigation only): FC_FOOTPRINT=axis spreads taps along each output axis's
+        // source-space step; FC_TAPCAP sets the per-axis cap.
+        let probe_axis = probe_mode_axis();
+        let cap = probe_tap_cap();
+        let taps = if footprint > 1.25 { footprint.ceil().min(cap) } else { 1.0 };
+        let inv = m.inverse().unwrap_or(filmcraft_geom::Affine::IDENTITY);
+        let (jx, jy) = ([inv.a as f32, inv.b as f32], [inv.c as f32, inv.d as f32]);
+        let axis_taps = |v: [f32; 2]| {
+            let l = (v[0] * v[0] + v[1] * v[1]).sqrt();
+            if l > 1.25 { l.ceil().min(cap) } else { 1.0 }
+        };
+        let (nx, ny) = (axis_taps(jx), axis_taps(jy));
+        let (taps, probe) = if probe_axis { (nx, [jx[0], jx[1], jy[0], jy[1], ny, 1.0, 0.0, 0.0]) } else { (taps, [0.0; 8]) };
         let _ = Matrix::Bt709;
         // colour management (q0..q5), stage by stage as `InputTransform::apply`
         let q = src.input.map_or([0.0; 24], |p| {
@@ -683,7 +695,8 @@ impl GpuCompositor {
         ];
         let mut u = [0.0; UNIFORM_FLOATS];
         u[..28].copy_from_slice(&base);
-        u[28..].copy_from_slice(&q);
+        u[28..52].copy_from_slice(&q);
+        u[52..].copy_from_slice(&probe);
         u
     }
 
@@ -1173,7 +1186,17 @@ struct SrcInfo {
 }
 
 /// Floats in a layer's uniform block (`U` in `composite.wgsl`: 13 vec4).
-const UNIFORM_FLOATS: usize = 52;
+const UNIFORM_FLOATS: usize = 60;
+
+fn probe_mode_axis() -> bool {
+    static M: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *M.get_or_init(|| std::env::var("FC_FOOTPRINT").is_ok_and(|v| v == "axis"))
+}
+
+fn probe_tap_cap() -> f32 {
+    static C: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *C.get_or_init(|| std::env::var("FC_TAPCAP").ok().and_then(|v| v.parse().ok()).unwrap_or(4.0))
+}
 
 /// Poll a future once: wgpu's native error scopes resolve immediately. `None` if it is still
 /// pending (then the caller assumes the worst).

@@ -22,6 +22,8 @@ struct U {
     q3: vec4<f32>,   // gamut matrix row 1, tone-mapping source peak cd/m²
     q4: vec4<f32>,   // gamut matrix row 2, tone-mapping target peak cd/m²
     q5: vec4<f32>,   // desaturation luma weights, desaturation on
+    j0: vec4<f32>,   // PROBE: source step per output x (xy), per output y (zw)
+    j1: vec4<f32>,   // PROBE: taps along y, per-axis mode on
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -203,6 +205,19 @@ fn sample(p: vec2<f32>) -> vec4<f32> {
 
 // The layer's premultiplied linear colour at this pixel, opacity applied.
 fn layer_color(sp: vec2<f32>) -> vec4<f32> {
+    if u.j1.y > 0.5 {
+        let nx = max(u32(u.p0.z), 1u);
+        let ny = max(u32(u.j1.x), 1u);
+        var acc2 = vec4(0.0);
+        for (var j = 0u; j < ny; j++) {
+            for (var i = 0u; i < nx; i++) {
+                let ox = (f32(i) + 0.5) / f32(nx) - 0.5;
+                let oy = (f32(j) + 0.5) / f32(ny) - 0.5;
+                acc2 += sample(sp + ox * u.j0.xy + oy * u.j0.zw);
+            }
+        }
+        return acc2 / f32(nx * ny) * u.p0.x;
+    }
     let n = max(u32(u.p0.z), 1u);
     let fp = u.p2.w;
     var acc = vec4(0.0);

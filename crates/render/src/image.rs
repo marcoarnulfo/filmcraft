@@ -88,7 +88,16 @@ impl Image {
         let sx = (m.a * m.a + m.b * m.b).sqrt();
         let sy = (m.c * m.c + m.d * m.d).sqrt();
         let minify = 1.0 / sx.min(sy).max(1e-6);
-        if minify >= 2.0 && self.w >= 4 && self.h >= 4 {
+        if probe_axis() {
+            // PROBE (investigation only): halve each axis on its own minification
+            let (mx, my) = (1.0 / sx.max(1e-6), 1.0 / sy.max(1e-6));
+            let (hx, hy) = (mx >= 2.0 && self.w >= 4, my >= 2.0 && self.h >= 4);
+            if hx || hy {
+                let half = self.downsample_axes(hx, hy);
+                let m2 = m.then_apply(&Affine::scale(if hx { 2.0 } else { 1.0 }, if hy { 2.0 } else { 1.0 }));
+                return half.transformed(w, h, &m2);
+            }
+        } else if minify >= 2.0 && self.w >= 4 && self.h >= 4 {
             let half = self.downsample2();
             let m2 = m.then_apply(&Affine::scale(2.0, 2.0));
             return half.transformed(w, h, &m2);
@@ -112,6 +121,31 @@ impl Image {
                 }
                 let s = self.sample_bilinear(u as f32, v as f32);
                 row[x * 4..x * 4 + 4].copy_from_slice(&s);
+            }
+        });
+        out
+    }
+
+    /// PROBE: box-halve along x, y or both.
+    fn downsample_axes(&self, hx: bool, hy: bool) -> Image {
+        let (fx, fy) = (if hx { 2 } else { 1 }, if hy { 2 } else { 1 });
+        let (w, h) = ((self.w / fx).max(1), (self.h / fy).max(1));
+        let mut out = Image::new(w, h);
+        let inv = 1.0 / (fx * fy) as f32;
+        out.px.par_chunks_mut(w * 4).enumerate().for_each(|(y, row)| {
+            for x in 0..w {
+                let mut acc = [0f32; 4];
+                for dy in 0..fy {
+                    for dx in 0..fx {
+                        let s = self.get_clamped((fx * x + dx) as isize, (fy * y + dy) as isize);
+                        for k in 0..4 {
+                            acc[k] += s[k];
+                        }
+                    }
+                }
+                for k in 0..4 {
+                    row[x * 4 + k] = acc[k] * inv;
+                }
             }
         });
         out
@@ -197,4 +231,9 @@ impl Image {
         });
         out
     }
+}
+
+fn probe_axis() -> bool {
+    static M: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *M.get_or_init(|| std::env::var("FC_FOOTPRINT").is_ok_and(|v| v == "axis"))
 }
