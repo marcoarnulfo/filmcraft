@@ -270,8 +270,8 @@ fn v10_minimal_loads_with_m3_11_defaults() {
 #[test]
 fn next_id_is_raised_past_every_id_in_the_file() {
     use filmcraft_project::{
-        BinId, Caption, CaptionFormat, CaptionTrack, Label, Marker, MarkerId, MarkerKind, Narration, ProjectLut, SearchBin, Track, TrackId, TrackKind,
-        Transition, TransitionId,
+        BinId, Camera, Caption, CaptionFormat, CaptionTrack, Label, Marker, MarkerId, MarkerKind, MergedClip, MulticamSource, Narration, ProjectLut, SearchBin,
+        Track, TrackId, TrackKind, TrackSend, Transition, TransitionId,
     };
     const BIG: u64 = 5_000_000;
     let base = decode(&fixture("v1-edit.fcproj")).unwrap().project;
@@ -368,6 +368,49 @@ fn next_id_is_raised_past_every_id_in_the_file() {
                 p.narrations.insert(ItemId(BIG), narration);
             }),
         ),
+        // only referenced, the target gone: a new item taking that id would be picked up by the reference
+        ("clip's item", Box::new(move |p| p.sequence_mut(seq).unwrap().video_tracks[0].items[0].item = ItemId(BIG))),
+        (
+            "subclip's parent",
+            Box::new(|p| {
+                let range = filmcraft_time::TimeRange::new(Tick::ZERO, Tick(1));
+                p.add_item("Subclip", Label::Iris, ItemKind::Subclip { parent: ItemId(BIG), range, restrict_trims: false }, None);
+            }),
+        ),
+        (
+            "transition's clip",
+            Box::new(move |p| {
+                let s = p.sequence_mut(seq).unwrap();
+                let clip = s.video_tracks[0].items[0].clone();
+                s.video_tracks[0].transitions.push(Transition {
+                    id: TransitionId(9),
+                    effect: clip.effects[0].clone(),
+                    start: clip.start,
+                    duration: Tick::ZERO,
+                    from: None,
+                    to: Some(ClipId(BIG)),
+                    align: Default::default(),
+                    reverse: false,
+                });
+            }),
+        ),
+        ("send target", Box::new(move |p| p.sequence_mut(seq).unwrap().audio_tracks[0].mixer.sends.push(TrackSend::new(TrackId(BIG))))),
+        ("track output", Box::new(move |p| p.sequence_mut(seq).unwrap().master_mixer.output = Some(TrackId(BIG)))),
+        (
+            "camera's source",
+            Box::new(move |p| {
+                let camera = Camera { name: "Cam 1".into(), video_track: None, audio_tracks: Vec::new(), enabled: true, source: Some(ItemId(BIG)) };
+                p.sequence_mut(seq).unwrap().multicam = Some(MulticamSource { cameras: vec![camera], ..Default::default() });
+            }),
+        ),
+        (
+            "camera's track",
+            Box::new(move |p| {
+                let camera = Camera { name: "Cam 1".into(), video_track: Some(TrackId(BIG)), audio_tracks: Vec::new(), enabled: true, source: None };
+                p.sequence_mut(seq).unwrap().multicam = Some(MulticamSource { cameras: vec![camera], ..Default::default() });
+            }),
+        ),
+        ("merged clip", Box::new(move |p| p.sequence_mut(seq).unwrap().merged = Some(MergedClip { audio: vec![ItemId(BIG)], ..Default::default() }))),
     ];
     for (kind, add) in &kinds {
         let mut p = base.clone();
