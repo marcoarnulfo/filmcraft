@@ -220,6 +220,8 @@ fn v8_loads_without_transcripts_and_v9_roundtrips_them() {
     t.normalize();
     p.transcripts.insert(ItemId(7), std::sync::Arc::new(t));
     let again = decode(&encode(&p, true)).unwrap();
+    // the transcript's key is an id in use, so new ids start past it (#2809)
+    p.next_id = 8;
     assert!(!again.migrated());
     assert_eq!(again.project, p);
     assert_eq!(again.project.transcripts[&ItemId(7)].speakers[0].name, "Speaker 1");
