@@ -1387,6 +1387,8 @@ impl Project {
             }
         }
         self.search_bins.iter().for_each(|b| see(b.id.0));
+        // deleting an item leaves these entries behind: a new item taking that id would inherit them
+        self.transcripts.keys().chain(self.source_graphics.keys()).chain(self.narrations.keys()).for_each(|i| see(i.0));
         // `lut.import` names LUTs `lut<id>`
         self.luts.iter().filter_map(|l| l.id.strip_prefix("lut")?.parse().ok()).for_each(&mut see);
         for (id, item) in &self.items {

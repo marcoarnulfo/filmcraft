@@ -268,8 +268,8 @@ fn v10_minimal_loads_with_m3_11_defaults() {
 #[test]
 fn next_id_is_raised_past_every_id_in_the_file() {
     use filmcraft_project::{
-        BinId, Caption, CaptionFormat, CaptionTrack, Label, Marker, MarkerId, MarkerKind, ProjectLut, SearchBin, Track, TrackId, TrackKind, Transition,
-        TransitionId,
+        BinId, Caption, CaptionFormat, CaptionTrack, Label, Marker, MarkerId, MarkerKind, Narration, ProjectLut, SearchBin, Track, TrackId, TrackKind,
+        Transition, TransitionId,
     };
     const BIG: u64 = 5_000_000;
     let base = decode(&fixture("v1-edit.fcproj")).unwrap().project;
@@ -348,6 +348,23 @@ fn next_id_is_raised_past_every_id_in_the_file() {
         (
             "LUT",
             Box::new(|p| p.luts.push(ProjectLut { id: format!("lut{BIG}"), name: "Look".into(), source_path: None, format: "cube".into(), text: "".into() })),
+        ),
+        // left behind by a deleted item: a new item must not take its id and inherit them
+        ("transcript", Box::new(|p| _ = p.transcripts.insert(ItemId(BIG), Default::default()))),
+        ("source graphic", Box::new(|p| _ = p.source_graphics.insert(ItemId(BIG), Default::default()))),
+        (
+            "narration",
+            Box::new(|p| {
+                let narration = Narration {
+                    text: "Hello".into(),
+                    language: "en-US".into(),
+                    voice: "basic-female".into(),
+                    pitch: Default::default(),
+                    pace: 1.0,
+                    speech_duration: Tick(1),
+                };
+                p.narrations.insert(ItemId(BIG), narration);
+            }),
         ),
     ];
     for (kind, add) in &kinds {
