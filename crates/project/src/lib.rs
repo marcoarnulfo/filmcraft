@@ -1344,6 +1344,11 @@ impl Default for Project {
 }
 
 impl Project {
+    /// The highest `next_id` a loaded project may carry. Ids are handed out one at a time, so no
+    /// amount of editing gets near it; a file past it is damaged, and refusing it keeps
+    /// `alloc_id` from overflowing.
+    pub const MAX_NEXT_ID: u64 = u64::MAX / 2;
+
     pub fn new(name: &str) -> Self {
         Self {
             name: name.into(),
@@ -1364,6 +1369,51 @@ impl Project {
         let id = self.next_id;
         self.next_id += 1;
         id
+    }
+
+    /// The largest id in use, of any kind. They all come from `next_id`, so a project read from a
+    /// file must have its `next_id` past this. The root bin counts, so there is always one.
+    pub fn max_id(&self) -> u64 {
+        let mut max = 0;
+        let mut see = |id: u64| max = max.max(id);
+        let mut bins = vec![&self.root];
+        while let Some(bin) = bins.pop() {
+            see(bin.id.0);
+            for c in &bin.children {
+                match c {
+                    BinEntry::Item(i) => see(i.0),
+                    BinEntry::Bin(sub) => bins.push(sub),
+                }
+            }
+        }
+        self.search_bins.iter().for_each(|b| see(b.id.0));
+        // `lut.import` names LUTs `lut<id>`
+        self.luts.iter().filter_map(|l| l.id.strip_prefix("lut")?.parse().ok()).for_each(&mut see);
+        for (id, item) in &self.items {
+            see(id.0);
+            see(item.id.0);
+            match &item.kind {
+                ItemKind::Media(m) => m.markers.iter().for_each(|mk| see(mk.id.0)),
+                ItemKind::Sequence(s) => {
+                    s.markers.iter().for_each(|mk| see(mk.id.0));
+                    for t in s.all_tracks().chain(&s.submix_tracks) {
+                        see(t.id.0);
+                        for c in &t.items {
+                            see(c.id.0);
+                            c.link.into_iter().chain(c.group).for_each(&mut see);
+                            c.markers.iter().for_each(|mk| see(mk.id.0));
+                        }
+                        t.transitions.iter().for_each(|tr| see(tr.id.0));
+                    }
+                    for t in &s.caption_tracks {
+                        see(t.id.0);
+                        t.captions.iter().for_each(|c| see(c.id.0));
+                    }
+                }
+                _ => {}
+            }
+        }
+        max
     }
 
     /// Add an item to a bin (root when None / not found).
