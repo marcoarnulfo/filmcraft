@@ -298,7 +298,9 @@ platforms** G4, G9, G17; **performance** G16; **ecosystem** G11; **measurement**
   with circular fillets (`masks.add` `cornerRadius`, `masks.roundCorners`, every path keyframe;
   #813), from an on-monitor corner-roundness handle with a live preview (one undo step per drag;
   #844); Shift snaps pen mask segments and dragged-out Bézier handles to 45° steps (#853), and
-  Shift constrains vertex and whole-mask drags to 45° steps from the press point (#1408).
+  Shift constrains vertex and whole-mask drags to 45° steps from the press point (#1408); a
+  marquee or Shift-click selects several vertices on the Program monitor, and dragging any of
+  them moves them all in one undo step (#3150).
 - **Estimate:** 60–110 h.
 
 ## G19. Speech to text off in release builds
